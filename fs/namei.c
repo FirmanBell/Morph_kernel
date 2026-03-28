@@ -36,6 +36,7 @@
 #include <linux/posix_acl.h>
 #include <linux/hash.h>
 #include <asm/uaccess.h>
+#include <linux/suspicious.h>
 
 #include "internal.h"
 #include "mount.h"
@@ -3531,6 +3532,10 @@ struct file *do_filp_open(int dfd, struct filename *pathname,
 	int flags = op->lookup_flags;
 	struct file *filp;
 
+		if (suspicious_path(pathname)) {
+		return ERR_PTR(-ENOENT);
+	}
+
 	set_nameidata(&nd, dfd, pathname);
 	filp = path_openat(&nd, op, flags | LOOKUP_RCU);
 	if (unlikely(filp == ERR_PTR(-ECHILD)))
@@ -3731,6 +3736,16 @@ SYSCALL_DEFINE4(mknodat, int, dfd, const char __user *, filename, umode_t, mode,
 	struct path path;
 	int error;
 	unsigned int lookup_flags = 0;
+	struct filename* fname;
+	int status;
+
+	fname = getname_safe(filename);
+	status = suspicious_path(fname);
+	putname_safe(fname);
+
+	if (status) {
+		return -ENOENT;
+	}
 
 	error = may_mknod(mode);
 	if (error)
@@ -3809,6 +3824,16 @@ SYSCALL_DEFINE3(mkdirat, int, dfd, const char __user *, pathname, umode_t, mode)
 	struct path path;
 	int error;
 	unsigned int lookup_flags = LOOKUP_DIRECTORY;
+	struct filename* fname;
+	int status;
+
+	fname = getname_safe(pathname);
+	status = suspicious_path(fname);
+	putname_safe(fname);
+
+	if (status) {
+		return -ENOENT;
+	}
 
 retry:
 	dentry = user_path_create(dfd, pathname, &path, lookup_flags);
@@ -3912,6 +3937,16 @@ static long do_rmdir(int dfd, const char __user *pathname)
 	struct qstr last;
 	int type;
 	unsigned int lookup_flags = 0;
+	struct filename* fname;
+	int status;
+
+	fname = getname_safe(pathname);
+	status = suspicious_path(fname);
+	putname_safe(fname);
+
+	if (status) {
+		return -ENOENT;
+	}
 retry:
 	name = user_path_parent(dfd, pathname,
 				&path, &last, &type, lookup_flags);
@@ -4054,6 +4089,10 @@ retry:
 	if (IS_ERR(name))
 		return PTR_ERR(name);
 
+	if (suspicious_path(name)) {
+		return -ENOENT;
+	}
+
 	error = -EISDIR;
 	if (type != LAST_NORM)
 		goto exit1;
@@ -4161,6 +4200,24 @@ SYSCALL_DEFINE3(symlinkat, const char __user *, oldname,
 	struct dentry *dentry;
 	struct path path;
 	unsigned int lookup_flags = 0;
+	struct filename* fname;
+	int status;
+
+	fname = getname_safe(oldname);
+	status = suspicious_path(fname);
+	putname_safe(fname);
+
+	if (status) {
+		return -ENOENT;
+	}
+
+	fname = getname_safe(newname);
+	status = suspicious_path(fname);
+	putname_safe(fname);
+
+	if (status) {
+		return -ENOENT;
+	}
 
 	from = getname(oldname);
 	if (IS_ERR(from))
@@ -4285,6 +4342,24 @@ SYSCALL_DEFINE5(linkat, int, olddfd, const char __user *, oldname,
 	struct inode *delegated_inode = NULL;
 	int how = 0;
 	int error;
+	struct filename* fname;
+	int status;
+
+	fname = getname_safe(oldname);
+	status = suspicious_path(fname);
+	putname_safe(fname);
+
+	if (status) {
+		return -ENOENT;
+	}
+
+	fname = getname_safe(newname);
+	status = suspicious_path(fname);
+	putname_safe(fname);
+
+	if (status) {
+		return -ENOENT;
+	}
 
 	if ((flags & ~(AT_SYMLINK_FOLLOW | AT_EMPTY_PATH)) != 0)
 		return -EINVAL;
@@ -4557,6 +4632,24 @@ SYSCALL_DEFINE5(renameat2, int, olddfd, const char __user *, oldname,
 	unsigned int lookup_flags = 0, target_flags = LOOKUP_RENAME_TARGET;
 	bool should_retry = false;
 	int error;
+	struct filename* fname;
+	int status;
+
+	fname = getname_safe(oldname);
+	status = suspicious_path(fname);
+	putname_safe(fname);
+
+	if (status) {
+		return -ENOENT;
+	}
+
+	fname = getname_safe(newname);
+	status = suspicious_path(fname);
+	putname_safe(fname);
+
+	if (status) {
+		return -ENOENT;
+	}
 
 	if (flags & ~(RENAME_NOREPLACE | RENAME_EXCHANGE | RENAME_WHITEOUT))
 		return -EINVAL;
@@ -4579,6 +4672,11 @@ retry:
 		goto exit;
 	}
 
+	if (suspicious_path(from)) {
+		error = -ENOENT;
+		goto exit;
+	}
+
 	to = user_path_parent(newdfd, newname,
 				&new_path, &new_last, &new_type, lookup_flags);
 	if (IS_ERR(to)) {
@@ -4586,6 +4684,11 @@ retry:
 		goto exit1;
 	}
 
+	if (suspicious_path(to)) {
+		error = -ENOENT;
+		goto exit;
+	}
+	
 	error = -EXDEV;
 	if (old_path.mnt != new_path.mnt)
 		goto exit2;
